@@ -29,13 +29,16 @@ async def verify(base, user_id, preflight, install_card=False):
                 assert (await ws.receive_json())["type"] == "auth_ok"
                 sequence = 0
 
-                async def command(kind, **kwargs):
+                async def command(kind, *, expected_error=None, **kwargs):
                     nonlocal sequence
                     sequence += 1
                     await ws.send_json({"id": sequence, "type": kind, **kwargs})
                     while True:
                         reply = await ws.receive_json()
                         if reply.get("id") == sequence:
+                            if expected_error:
+                                assert not reply.get("success") and reply.get("error", {}).get("code") == expected_error, reply
+                                return reply["error"]
                             assert reply.get("success"), reply.get("error")
                             return reply.get("result")
 
@@ -51,6 +54,9 @@ async def verify(base, user_id, preflight, install_card=False):
                 status = await command("lxserver_cast/panel", action="status")
                 assert "current" in status and "upcoming" in status
                 print("panel status: OK; favorites:", len(status["favorites"]))
+                await command("lxserver_cast/panel", action="enqueue", track_ids=["expired-verification-reference"], expected_error="expired")
+                await command("lxserver_cast/panel", action="enqueue", track_ids=["expired-verification-reference"] * 201, expected_error="invalid_format")
+                print("enqueue schema/stale reference rejection: OK; queue unchanged")
                 rows = await command("lxserver_cast/panel", action="search", query="Mozart", source="kw")
                 assert rows and rows[0].get("track_id")
                 assert all("token" not in r and "url" not in r for r in rows)

@@ -6,9 +6,11 @@
 - [x] Artist/playlist drill-down and Back restoring previous results.
 - [x] Per-song, artist, playlist and all-results enqueue controls with count feedback.
 - [x] Serialized append, idle staging and native Play support; no receiver commands on enqueue.
-- [x] Backend tests: 50 pass, including sanitization, stale batches, source capabilities, queue ordering and capacity.
-- [ ] Browser verification at desktop and mobile widths.
-- [ ] Back up, deploy and verify Home Assistant; publish HACS release.
+- [x] Backend tests: 51 pass, including sanitization, stale batches, source capabilities, queue ordering and capacity.
+- [x] Browser verification at desktop/390px/320px; nine mocked player controls and 93 mocked queue additions pass. Real searches return 20 songs, 20 artists and 20 playlists; tested drill-down returns 21 artist tracks and 50 playlist tracks. Back and editor checks pass.
+- [x] Back up, deploy and verify Home Assistant; publish HACS v0.4.0 at tested code `efe8912`. Both CI jobs, including HACS validation, pass.
+
+Deployment backup: `/config/.audit-backups/lxserver-search-20261020-171424`. Core check/restart succeeded. All 19 package files match live hashes. Live WebSocket schema rejects stale and oversized queue batches without modifying the queue; search, artist navigation, popular playlist navigation, native browser and buttons pass. No receiver commands or automation edits during verification. Player remains off with the RZ50 selected. Temporary API/browser logins revoked. Browser connection-refused errors occurred during the planned Core restart, with none added during the subsequent UI tests. Physical phone/playback qualification was not performed. Screenshots: `output/playwright/lx-search-{desktop,phone,320}.png`.
 
 ## Complete Dashboard Card - 0.3.0
 
