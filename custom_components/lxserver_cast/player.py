@@ -71,6 +71,12 @@ class CastQueuePlayer:
                 return
             await self._play_next()
 
+    async def previous(self) -> None:
+        async with self._lock:
+            if self._queue is not None:
+                self._queue.rewind()
+                await self._play_next()
+
     async def release(self) -> None:
         """Stop advancing and revoke the current grant. Does not touch playback."""
         if self._unsubscribe is not None:

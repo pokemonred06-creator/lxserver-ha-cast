@@ -11,6 +11,17 @@ Home Assistant integration that plays music from an lxserver (LX Music Server) o
 
 Before setup, create a dedicated user in the lxserver admin panel and make sure the Cast device appears under Google Cast.
 
+## Dashboard Card
+
+Choose **Add card > LX Music** in a dashboard. The integration automatically loads the bundled card and includes a visual editor. All playback, volume, mute, Cast target, search, browsing and queue controls are inside the card.
+
+```yaml
+type: custom:lx-music-card
+entity: media_player.lx_server
+```
+
+The Cast dropdown selects the output for subsequent playback and saves the choice. It does not transfer an existing queue. The browser and dashboard card use the same administrator session as the sidebar.
+
 ## Using it
 
 Open **LX Music** in the Home Assistant sidebar. The bundled interface includes Player, Browse, Queue and Settings tabs, song search, playlist navigation and playback controls. It follows your Home Assistant theme and works on phones. The sidebar is available to administrators.

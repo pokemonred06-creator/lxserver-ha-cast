@@ -32,3 +32,7 @@ class PlaybackQueue(Generic[T]):
         item = self._items[self._position]
         self._position += 1
         return item
+
+    def rewind(self) -> None:
+        """Make the previous track the next item; restart the first at the boundary."""
+        self._position = max(0, self._position - 2)

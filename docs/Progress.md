@@ -1,5 +1,20 @@
 # Current Progress
 
+## Complete Dashboard Card - 0.3.0
+
+- [x] Bundle `custom:lx-music-card` and its visual editor in the integration.
+- [x] Register frontend module automatically in Home Assistant.
+- [x] Add previous/play/pause/next/stop, live volume, mute, seek and Cast output selection.
+- [x] Keep Browse, Queue and Settings inside the card using the shared interface.
+- [x] Save output selection without reloading the integration or transferring playback.
+- [x] Verify standalone card/editor at dashboard and phone widths; nine mocked controls, live search and editor changes pass with no receiver commands.
+- [x] Deploy package on HA 2026.10.2; 33 backend tests and JS/Python checks pass.
+- [ ] Publish the verified 0.3.0 HACS release.
+
+Preview dashboard: `/lx-music-player/player` (administrator-only, no additional sidebar entry). Backup: `/config/.audit-backups/lxserver-card-20261020-161752`. Live output source list contains four Cast players; the selected RZ50 and morning automation were preserved. Screenshots: `output/playwright/lx-complete-card-desktop.png` and `lx-complete-card-phone.png`.
+
+## Previous Sidebar Release
+
 - [x] HACS integration with login form and native media player.
 - [x] Media browser, favorite buttons and device controls.
 - [x] Bundled sidebar with Player, Browse, Queue and Settings.

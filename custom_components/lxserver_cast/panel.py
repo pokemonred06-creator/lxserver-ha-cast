@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import probatio as vol
 
-from homeassistant.components import panel_custom, websocket_api
+from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
@@ -28,13 +28,14 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         [StaticPathConfig(ASSET_URL, str(Path(__file__).parent / "frontend"), False)]
     )
     websocket_api.async_register_command(hass, handle_panel)
+    frontend.add_extra_js_url(hass, f"{ASSET_URL}/card.js?v=0.3.0")
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path="lx-music",
         webcomponent_name="lx-music-panel",
         sidebar_title="LX Music",
         sidebar_icon="mdi:music-box-multiple",
-        module_url=f"{ASSET_URL}/panel.js?v=0.2.0",
+        module_url=f"{ASSET_URL}/panel.js?v=0.3.0",
         require_admin=True,
         config_panel_domain=DOMAIN,
     )

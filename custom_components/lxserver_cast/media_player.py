@@ -17,6 +17,8 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import LxRuntime, device_info
 from .const import BROWSE_SOURCE, CONF_VOLUME, DEFAULT_VOLUME, DOMAIN, MAX_PLAYLIST_TRACKS
@@ -145,12 +147,18 @@ class LxServerMediaPlayer(MediaPlayerEntity):
         | MediaPlayerEntityFeature.PLAY
         | MediaPlayerEntityFeature.PAUSE
         | MediaPlayerEntityFeature.NEXT_TRACK
+        | MediaPlayerEntityFeature.PREVIOUS_TRACK
         | MediaPlayerEntityFeature.STOP
         | MediaPlayerEntityFeature.VOLUME_SET
+        | MediaPlayerEntityFeature.VOLUME_MUTE
+        | MediaPlayerEntityFeature.SELECT_SOURCE
+        | MediaPlayerEntityFeature.SEEK
     )
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry_id = entry.entry_id
+        self._entry = entry
+        self._unsubscribe_target = None
         self._attr_unique_id = entry.entry_id
         self._attr_device_info = device_info(entry.entry_id)
         self._attr_volume_level = float(entry.options.get(CONF_VOLUME, DEFAULT_VOLUME))
@@ -179,6 +187,63 @@ class LxServerMediaPlayer(MediaPlayerEntity):
     def extra_state_attributes(self) -> dict[str, str]:
         return {"lxserver_entry_id": self._entry_id}
 
+    def _output(self):
+        runtime = self._runtime()
+        return self.hass.states.get(runtime.default_target) if runtime and runtime.default_target else None
+
+    @property
+    def source(self) -> str | None:
+        runtime = self._runtime()
+        return runtime.default_target if runtime else None
+
+    @property
+    def source_list(self) -> list[str]:
+        registry = er.async_get(self.hass)
+        return sorted(state.entity_id for state in self.hass.states.async_all("media_player")
+                      if (entry := registry.async_get(state.entity_id)) and entry.platform == "cast")
+
+    @property
+    def volume_level(self) -> float | None:
+        output = self._output()
+        volume = output.attributes.get("volume_level") if output else None
+        return volume if volume is not None else self._attr_volume_level
+
+    @property
+    def is_volume_muted(self) -> bool:
+        output = self._output()
+        return bool(output.attributes.get("is_volume_muted", False)) if output else False
+
+    @property
+    def media_artist(self) -> str | None:
+        runtime = self._runtime()
+        player = runtime.players.get(runtime.default_target) if runtime else None
+        current = player.snapshot["current"] if player else None
+        return current.get("singer") if current else None
+
+    @property
+    def media_image_url(self) -> str | None:
+        runtime = self._runtime()
+        player = runtime.players.get(runtime.default_target) if runtime else None
+        current = player.snapshot["current"] if player else None
+        return current.get("img") if current else None
+
+    @property
+    def media_duration(self) -> float | None:
+        output = self._output()
+        return output.attributes.get("media_duration") if output else None
+
+    @property
+    def media_position(self) -> float | None:
+        output = self._output()
+        return output.attributes.get("media_position") if output else None
+
+    @property
+    def media_position_updated_at(self):
+        from homeassistant.util.dt import parse_datetime
+        output = self._output()
+        value = output.attributes.get("media_position_updated_at") if output else None
+        return parse_datetime(value) if isinstance(value, str) else value
+
     @property
     def state(self) -> MediaPlayerState:
         runtime = self._runtime()
@@ -197,11 +262,23 @@ class LxServerMediaPlayer(MediaPlayerEntity):
         return player.current_title if player else None
 
     async def async_added_to_hass(self) -> None:
+        self._watch_output()
+        self.async_on_remove(async_dispatcher_connect(self.hass, f"{DOMAIN}_{self._entry_id}_target", self._watch_output))
+        self.async_on_remove(self._stop_watching)
+
+    @callback
+    def _stop_watching(self):
+        if self._unsubscribe_target:
+            self._unsubscribe_target()
+            self._unsubscribe_target = None
+
+    @callback
+    def _watch_output(self):
+        self._stop_watching()
         runtime = self._runtime()
         if runtime and runtime.default_target:
-            self.async_on_remove(
-                async_track_state_change_event(self.hass, [runtime.default_target], self._on_target_change)
-            )
+            self._unsubscribe_target = async_track_state_change_event(self.hass, [runtime.default_target], self._on_target_change)
+        self.async_write_ha_state()
 
     @callback
     def _on_target_change(self, event: Event) -> None:
@@ -247,6 +324,11 @@ class LxServerMediaPlayer(MediaPlayerEntity):
         await runtime.player_for(self._require_target(runtime)).skip()
         self.async_write_ha_state()
 
+    async def async_media_previous_track(self) -> None:
+        runtime = self._require_runtime()
+        await runtime.player_for(self._require_target(runtime)).previous()
+        self.async_write_ha_state()
+
     async def async_media_stop(self) -> None:
         runtime = self._require_runtime()
         await runtime.player_for(self._require_target(runtime)).stop()
@@ -260,3 +342,20 @@ class LxServerMediaPlayer(MediaPlayerEntity):
             "media_player", "volume_set", {"entity_id": target, "volume_level": volume}, blocking=True
         )
         self.async_write_ha_state()
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        runtime = self._require_runtime()
+        await self.hass.services.async_call("media_player", "volume_mute", {
+            "entity_id": self._require_target(runtime), "is_volume_muted": mute,
+        }, blocking=True)
+
+    async def async_media_seek(self, position: float) -> None:
+        runtime = self._require_runtime()
+        await self.hass.services.async_call("media_player", "media_seek", {
+            "entity_id": self._require_target(runtime), "seek_position": position,
+        }, blocking=True)
+
+    async def async_select_source(self, source: str) -> None:
+        if source not in self.source_list:
+            raise ServiceValidationError("Choose an available Google Cast device")
+        self.hass.config_entries.async_update_entry(self._entry, options={**self._entry.options, "target": source})

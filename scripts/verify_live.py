@@ -7,7 +7,7 @@ import json
 import aiohttp
 
 
-async def verify(base, user_id, preflight):
+async def verify(base, user_id, preflight, install_card=False):
     client_id = "http://localhost/"
     refresh = None
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
@@ -69,6 +69,18 @@ async def verify(base, user_id, preflight):
                     assert response.status == 200
                     assert "class LxMusicPanel" in await response.text()
                 print("frontend asset: OK")
+                if install_card:
+                    dashboards = await command("lovelace/dashboards/list")
+                    path = "lx-music-player"
+                    existing = next((d for d in dashboards if d["url_path"] == path), None)
+                    if existing is None:
+                        await command("lovelace/dashboards/create", url_path=path, title="LX Music Player", icon="mdi:music", show_in_sidebar=False, require_admin=True)
+                        await command("lovelace/config/save", url_path=path, config={
+                            "title": "LX Music Player", "views": [{"title": "Player", "path": "player", "icon": "mdi:music", "cards": [{"type": "custom:lx-music-card", "entity": "media_player.lx_server"}]}],
+                        })
+                        print("card dashboard: installed at /lx-music-player/player")
+                    else:
+                        print("card dashboard: already exists; preserved")
         finally:
             if refresh:
                 async with session.post(base + "/auth/revoke", data={"token": refresh}) as response:
@@ -81,5 +93,6 @@ if __name__ == "__main__":
     parser.add_argument("--base", required=True)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--install-card", action="store_true")
     args = parser.parse_args()
-    asyncio.run(verify(args.base.rstrip("/"), args.user_id, args.preflight))
+    asyncio.run(verify(args.base.rstrip("/"), args.user_id, args.preflight, args.install_card))

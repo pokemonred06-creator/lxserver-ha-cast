@@ -213,6 +213,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _reload_on_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    options = entry.options
+    if runtime and (
+        options.get(CONF_QUALITY, DEFAULT_QUALITY) == runtime.quality
+        and float(options.get(CONF_VOLUME, DEFAULT_VOLUME)) == runtime.default_volume
+        and parse_favorites(options.get(CONF_FAVORITES, DEFAULT_FAVORITES)) == runtime.favorites
+    ):
+        runtime.default_target = options.get(CONF_TARGET) or None
+        async_dispatcher_send(hass, f"{DOMAIN}_{entry.entry_id}_target")
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

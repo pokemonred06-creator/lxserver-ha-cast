@@ -67,3 +67,16 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await self.player.skip()
         self.assertIsNone(self.player.current_title)
         self.assertEqual(self.hass.services.async_call.await_args.args[1], "media_stop")
+
+    async def test_previous_restores_previous_track_and_queue(self):
+        await self.player.start([{"name": "A"}, {"name": "B"}, {"name": "C"}], shuffle=False, volume=0.1)
+        await self.player.skip()
+        await self.player.previous()
+        self.assertEqual(self.player.current_title, "A")
+        self.assertEqual([song["name"] for song in self.player.snapshot["upcoming"]], ["B", "C"])
+
+    async def test_previous_on_first_track_restarts_it(self):
+        await self.player.start([{"name": "A"}, {"name": "B"}], shuffle=False, volume=0.1)
+        await self.player.previous()
+        self.assertEqual(self.player.current_title, "A")
+        self.assertEqual([song["name"] for song in self.player.snapshot["upcoming"]], ["B"])
