@@ -9,6 +9,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -41,6 +42,8 @@ from .player import CastQueuePlayer
 from .transport import AiohttpTransport
 
 _LOGGER = logging.getLogger(__name__)
+
+PLATFORMS = [Platform.MEDIA_PLAYER]
 
 _VOLUME = vol.All(vol.Coerce(float), vol.Range(min=0, max=1))
 
@@ -159,6 +162,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         quality=options.get(CONF_QUALITY, DEFAULT_QUALITY),
     )
     entry.async_on_unload(entry.add_update_listener(_reload_on_change))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -167,6 +171,8 @@ async def _reload_on_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     runtime = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if runtime is not None:
         for player in runtime.players.values():

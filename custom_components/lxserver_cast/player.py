@@ -29,6 +29,11 @@ class CastQueuePlayer:
         self._queue: PlaybackQueue[Song] | None = None
         self._grant_id: str | None = None
         self._unsubscribe: Callable[[], None] | None = None
+        self._current_title: str | None = None
+
+    @property
+    def current_title(self) -> str | None:
+        return self._current_title
 
     async def start(self, songs: list[Song], *, shuffle: bool, volume: float) -> None:
         await self.release()
@@ -47,6 +52,7 @@ class CastQueuePlayer:
             self._unsubscribe()
             self._unsubscribe = None
         self._queue = None
+        self._current_title = None
         grant_id, self._grant_id = self._grant_id, None
         if grant_id is not None:
             await self._client.revoke_grant(grant_id)
@@ -82,6 +88,7 @@ class CastQueuePlayer:
             previous, self._grant_id = self._grant_id, grant_id
             if previous is not None:
                 await self._client.revoke_grant(previous)
+            self._current_title = song.get("name")
             await self._call(
                 "media_player",
                 "play_media",

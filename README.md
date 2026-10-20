@@ -19,6 +19,13 @@ Before setup, create a dedicated user in the lxserver admin panel, and make sure
 
 Each track gets a fresh stream grant when it starts. Grants expire after two hours on the server.
 
+## Media player
+
+The integration adds an `LX Server` media player that sends playback to the default Cast device set in the options.
+
+- `media_player.play_media` with `media_content_type: playlist` and `media_content_id: wy:17879848678` (source:playlist ID) queues a playlist.
+- `media_player.play_media` with `media_content_type: music` and a search phrase plays the top match.
+
 ## Tests
 
     python3 -m unittest discover -s tests -v
