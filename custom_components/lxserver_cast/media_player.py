@@ -312,7 +312,10 @@ class LxServerMediaPlayer(MediaPlayerEntity):
         await self.hass.services.async_call("media_player", service, {"entity_id": target}, blocking=True)
 
     async def async_media_play(self) -> None:
-        await self._forward("media_play")
+        runtime = self._require_runtime()
+        player = runtime.player_for(self._require_target(runtime))
+        if not await player.play_staged(volume=runtime.default_volume):
+            await self._forward("media_play")
         self.async_write_ha_state()
 
     async def async_media_pause(self) -> None:

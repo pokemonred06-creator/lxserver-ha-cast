@@ -9,6 +9,11 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 Song = dict[str, Any]
+SEARCH_SOURCES = {
+    "song": ("kw", "wy", "tx", "kg", "mg"),
+    "artist": ("wy", "tx"),
+    "playlist": ("wy",),
+}
 
 
 class LxServerError(Exception):
@@ -17,6 +22,10 @@ class LxServerError(Exception):
 
 class LxServerAuthError(LxServerError):
     """The username or password was rejected."""
+
+
+class LxQueueFullError(LxServerError):
+    """An enqueue request would exceed the upcoming-track limit."""
 
 
 class Transport(Protocol):
@@ -40,7 +49,10 @@ def mime_for_quality(quality: str) -> str:
 def _songs(status: int, data: Any, what: str) -> list[Song]:
     if status != 200 or not isinstance(data, dict):
         raise LxServerError(f"Could not load {what} (HTTP {status})")
-    return [item for item in data.get("list", []) if isinstance(item, dict)]
+    items = data.get("list")
+    if not isinstance(items, list):
+        raise LxServerError(f"Invalid {what} response")
+    return [item for item in items if isinstance(item, dict)]
 
 
 class LxServerClient:
@@ -80,13 +92,25 @@ class LxServerClient:
             status, data = await self._send(method, path, params, body)
         return status, data
 
-    async def search(self, query: str, *, source: str = "kw", limit: int = 3) -> list[Song]:
+    async def search(self, query: str, *, source: str = "kw", limit: int = 3, kind: str = "song") -> list[Song]:
+        if source not in SEARCH_SOURCES.get(kind, ()):
+            raise LxServerError("This source does not support the selected search type")
         status, data = await self._authed(
             "GET",
             "/api/music/search",
-            params={"name": query, "source": source, "type": "song", "limit": limit, "page": 1},
+            params={"name": query, "source": source, "type": "singer" if kind == "artist" else kind, "limit": limit, "page": 1},
         )
         return _songs(status, data, f"search for {query!r}")
+
+    async def artist_tracks(self, source: str, artist_id: str) -> list[Song]:
+        if source not in SEARCH_SOURCES["artist"]:
+            raise LxServerError("This source does not support artists")
+        status, data = await self._authed(
+            "GET", "/api/music/artistSongs", params={"source": source, "id": artist_id, "order": "hot"}
+        )
+        if status != 200 or not isinstance(data, list):
+            raise LxServerError(f"Could not load artist tracks (HTTP {status})")
+        return [song for song in data if isinstance(song, dict)]
 
     async def songlist_tracks(self, source: str, list_id: str) -> list[Song]:
         status, data = await self._authed(

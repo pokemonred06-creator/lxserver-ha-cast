@@ -1,11 +1,11 @@
-import {LxMusicPanel, escapeHTML} from "./panel.js?v=0.3.0";
+import {LxMusicPanel, escapeHTML} from "./panel.js?v=0.4.0";
 
 class LxMusicCard extends LxMusicPanel {
   constructor() { super(); this.cardMode=true; }
   connectedCallback() { this.setAttribute("data-card","");super.connectedCallback(); }
   setConfig(config) {
     if(config.entity && !config.entity.startsWith("media_player.")) throw new Error("Choose an LX Server media player");
-    this._config={...config}; this.data=null; this.items=[]; this.trail=[];
+    this._config={...config}; this.data=null; this.items=[]; this.trail=[]; this.backStack=[];
     this.render(); this.refresh();
   }
   getCardSize() { return this.tab==="player"?6:9; }

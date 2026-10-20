@@ -11,7 +11,7 @@ from typing import Any
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .lxserver import LxServerClient, LxServerError, Song, mime_for_quality
+from .lxserver import LxServerClient, LxServerError, LxQueueFullError, Song, mime_for_quality
 from .playlist import PlaybackQueue
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +59,26 @@ class CastQueuePlayer:
             await self.release()
             await self._call("media_player", "media_stop", {"entity_id": self._target})
 
+    async def enqueue(self, songs: list[Song]) -> None:
+        """Stage tracks or append to playback without sending receiver commands."""
+        async with self._lock:
+            if len(songs) + (self._queue.remaining if self._queue else 0) > 1000:
+                raise LxQueueFullError("The queue is full (1000 upcoming tracks)")
+            if self._queue is None:
+                self._queue = PlaybackQueue(songs)
+            else:
+                self._queue.append(songs)
+
+    async def play_staged(self, *, volume: float) -> bool:
+        """Start an idle staged queue; return False when receiver resume is needed."""
+        async with self._lock:
+            if self._current_song is not None or self._queue is None or not self._queue.remaining:
+                return False
+            self._unsubscribe = async_track_state_change_event(self._hass, [self._target], self._on_state_change)
+            await self._call("media_player", "volume_set", {"entity_id": self._target, "volume_level": volume})
+            await self._play_next()
+            return True
+
     async def skip(self) -> None:
         """Start the next queued track now. Stops playback when nothing is left."""
         async with self._lock:
@@ -93,7 +113,7 @@ class CastQueuePlayer:
     def _on_state_change(self, event: Event) -> None:
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
-        if old_state is None or new_state is None:
+        if old_state is None or new_state is None or self._current_song is None:
             return
         if old_state.state in _ACTIVE_STATES and new_state.state in _FINISHED_STATES:
             if time.monotonic() - self._started_at < _SWITCH_GRACE_S:
@@ -103,7 +123,7 @@ class CastQueuePlayer:
     async def _advance(self) -> None:
         try:
             async with self._lock:
-                if time.monotonic() - self._started_at >= _SWITCH_GRACE_S:
+                if self._current_song is not None and time.monotonic() - self._started_at >= _SWITCH_GRACE_S:
                     await self._play_next()
         except Exception:
             _LOGGER.exception("Could not advance playback on %s", self._target)

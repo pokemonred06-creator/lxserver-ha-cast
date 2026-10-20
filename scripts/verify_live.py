@@ -43,6 +43,7 @@ async def verify(base, user_id, preflight, install_card=False):
                 player = next(s for s in states if s["entity_id"] == "media_player.lx_server")
                 print("player:", player["state"], "features:", player["attributes"].get("supported_features"))
                 if preflight:
+                    print("target:", player["attributes"].get("source"))
                     return
                 panels = await command("get_panels")
                 assert "lx-music" in panels, list(panels)
@@ -54,6 +55,14 @@ async def verify(base, user_id, preflight, install_card=False):
                 assert rows and rows[0].get("track_id")
                 assert all("token" not in r and "url" not in r for r in rows)
                 print("search: OK; results:", len(rows))
+                artists = await command("lxserver_cast/panel", action="search", query="Mozart", source="wy", search_type="artist")
+                assert artists and artists[0].get("id")
+                artist_tracks = await command("lxserver_cast/panel", action="artist", source="wy", list_id=str(artists[1]["id"]))
+                assert artist_tracks and artist_tracks[0].get("track_id")
+                print("artist search/navigation: OK; results:", len(artists), "tracks:", len(artist_tracks))
+                playlists = await command("lxserver_cast/panel", action="search", query="Mozart", source="wy", search_type="playlist")
+                assert playlists and playlists[0].get("id") and playlists[0].get("img")
+                print("playlist search: OK; results:", len(playlists))
                 popular = await command("lxserver_cast/panel", action="popular", source="wy")
                 assert popular
                 tracks = await command("lxserver_cast/panel", action="playlist", source="wy", list_id=str(popular[0]["id"]))

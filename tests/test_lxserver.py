@@ -123,6 +123,34 @@ class LxServerClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[1]["path"], "/api/music/songList/list")
         self.assertEqual(transport.calls[1]["params"]["sortId"], "hot")
 
+    def test_artist_and_playlist_search_types(self) -> None:
+        for kind, api_type in (("artist", "singer"), ("playlist", "playlist")):
+            with self.subTest(kind=kind):
+                transport = ScriptedTransport([(200, {"token": "t"}), (200, {"list": [{"id": 1}]})])
+                client = lxserver.LxServerClient(transport, BASE, "u", "p")
+                self.assertEqual(asyncio.run(client.search("x", source="wy", kind=kind, limit=20)), [{"id": 1}])
+                self.assertEqual(transport.calls[1]["params"]["type"], api_type)
+
+    def test_unsupported_search_does_not_send_requests(self) -> None:
+        transport = ScriptedTransport([])
+        client = lxserver.LxServerClient(transport, BASE, "u", "p")
+        with self.assertRaises(lxserver.LxServerError):
+            asyncio.run(client.search("x", source="kw", kind="playlist"))
+        self.assertEqual(transport.calls, [])
+
+    def test_artist_tracks_accepts_array_and_filters_invalid_items(self) -> None:
+        transport = ScriptedTransport([(200, {"token": "t"}), (200, [{"name": "A"}, None])])
+        client = lxserver.LxServerClient(transport, BASE, "u", "p")
+        self.assertEqual(asyncio.run(client.artist_tracks("tx", "mid")), [{"name": "A"}])
+        self.assertEqual(transport.calls[1]["params"], {"source": "tx", "id": "mid", "order": "hot"})
+
+    def test_malformed_catalog_responses_raise(self) -> None:
+        for method, body in (("search", {"list": None}), ("artist", {"list": []})):
+            transport = ScriptedTransport([(200, {"token": "t"}), (200, body)])
+            client = lxserver.LxServerClient(transport, BASE, "u", "p")
+            with self.assertRaises(lxserver.LxServerError):
+                asyncio.run(client.search("x") if method == "search" else client.artist_tracks("wy", "1"))
+
 
 if __name__ == "__main__":
     unittest.main()

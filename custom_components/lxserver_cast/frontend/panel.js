@@ -7,11 +7,12 @@ const artwork = value => {
 export class LxMusicPanel extends HTMLElement {
   constructor() {
     super(); this.attachShadow({mode:"open"}); this.tab="player"; this.data=null;
-    this.items=[]; this.kind="tracks"; this.trail=[]; this.busy=false; this.error=""; this.source="kw"; this.query="";
+    this.items=[]; this.kind="tracks"; this.trail=[]; this.backStack=[]; this.busy=false; this.error=""; this.notice=""; this.source="kw"; this.query=""; this.searchType="song";
     this.shadowRoot.addEventListener("click", event => this.click(event));
     this.shadowRoot.addEventListener("submit", event => { event.preventDefault(); this.search(); });
     this.shadowRoot.addEventListener("change", event => this.change(event));
     this.shadowRoot.addEventListener("input", event => {
+      if(event.target.name==="query") this.query=event.target.value;
       if(event.target.name==="volume") event.target.parentElement.querySelector("output").textContent=`${Math.round(Number(event.target.value)*100)}%`;
     });
     this.shadowRoot.addEventListener("keydown", event => {
@@ -38,7 +39,7 @@ export class LxMusicPanel extends HTMLElement {
     finally { this.refreshing=false; }
   }
   async run(action) {
-    this.busy=true; this.error=""; this.render();
+    this.busy=true; this.error=""; this.notice=""; this.render();
     try { await action(); }
     catch(error) { this.error=error.message || "Request failed"; }
     finally { this.busy=false; await this.refresh(); this.render(); }
@@ -46,7 +47,16 @@ export class LxMusicPanel extends HTMLElement {
   async search() {
     this.query=this.shadowRoot.querySelector("input[name=query]")?.value?.trim() || "";
     if(!this.query) return;
-    await this.run(async()=>{ this.items=await this.request("search",{query:this.query,source:this.source}); this.kind="tracks"; this.trail=[]; });
+    await this.run(async()=>{ this.items=await this.request("search",{query:this.query,source:this.source,search_type:this.searchType}); this.kind={song:"tracks",artist:"artists",playlist:"playlists"}[this.searchType]; this.trail=[]; this.backStack=[]; });
+  }
+  sources() { return this.data?.search_sources?.[this.searchType] || {song:["kw","wy","tx","kg","mg"],artist:["wy","tx"],playlist:["wy"]}[this.searchType]; }
+  async collectionTracks(item, kind=this.kind) {
+    return this.request(kind==="artists"?"artist":"playlist",{source:item.source||"wy",list_id:String(item.id)});
+  }
+  async enqueue(items) {
+    if(!items.length) throw new Error("No tracks to add");
+    const result=await this.request("enqueue",{track_ids:items.map(item=>item.track_id)});
+    this.notice=`Added ${result.queued} ${result.queued===1?"track":"tracks"} to queue`;
   }
   icon(name) { return `<ha-icon icon="mdi:${name}" aria-hidden="true"></ha-icon>`; }
   button(action, icon, label, more="") {
@@ -55,14 +65,18 @@ export class LxMusicPanel extends HTMLElement {
   async click(event) {
     const button=event.target.closest("button,a[data-nav]"); if(!button) return;
     const action=button.dataset.action;
+    if(button.disabled || this.busy) return;
+    if(button.dataset.searchType) { this.searchType=button.dataset.searchType;if(!this.sources().includes(this.source))this.source=this.sources()[0];this.render();return; }
     if(button.dataset.nav) { event.preventDefault(); history.pushState(null,"",button.getAttribute("href")); window.dispatchEvent(new Event("location-changed")); return; }
     if(button.dataset.tab) { this.tab=button.dataset.tab; this.error=""; this.render(); return; }
     if(action==="menu") { this.dispatchEvent(new CustomEvent("hass-toggle-menu",{bubbles:true,composed:true})); return; }
-    if(action==="popular") return this.run(async()=>{this.items=await this.request("popular",{source:"wy"});this.kind="playlists";this.trail=["Popular playlists"];});
-    if(action==="favorites") { this.items=this.data?.favorites||[];this.kind="playlists";this.trail=["Favorites"];this.render();return; }
-    if(action==="back") { this.items=[];this.trail=[];this.render();return; }
-    if(action==="open") { const item=this.items[Number(button.dataset.index)];return this.run(async()=>{this.items=await this.request("playlist",{source:item.source||"wy",list_id:String(item.id)});this.kind="tracks";this.trail=[item.name];}); }
+    if(action==="popular") return this.run(async()=>{this.items=await this.request("popular",{source:"wy"});this.kind="playlists";this.trail=["Popular playlists"];this.backStack=[];});
+    if(action==="favorites") { this.items=this.data?.favorites||[];this.kind="playlists";this.trail=["Favorites"];this.backStack=[];this.render();return; }
+    if(action==="back") { const previous=this.backStack.pop();if(previous)Object.assign(this,previous);else {this.items=[];this.trail=[];}this.notice="";this.render();return; }
+    if(action==="open") { const item=this.items[Number(button.dataset.index)];return this.run(async()=>{const tracks=await this.collectionTracks(item);this.backStack.push({items:this.items,kind:this.kind,trail:this.trail});this.items=tracks;this.kind="tracks";this.trail=[item.name];}); }
     if(action==="track") { const item=this.items[Number(button.dataset.index)];return this.run(async()=>{await this.request("play",{track_id:item.track_id});this.tab="player";}); }
+    if(action==="enqueue") {const item=this.items[Number(button.dataset.index)];return this.run(async()=>this.enqueue(this.kind==="tracks"?[item]:await this.collectionTracks(item)));}
+    if(action==="enqueue-all") return this.run(()=>this.enqueue(this.items));
     if(action==="mute") return this.run(()=>this.hass.callService("media_player","volume_mute",{
       entity_id:this.playerEntity(),is_volume_muted:!this.hass?.states?.[this.playerEntity()]?.attributes?.is_volume_muted,
     }));
@@ -76,7 +90,7 @@ export class LxMusicPanel extends HTMLElement {
   }
   async change(event) {
     if(event.target.name==="source") { this.source=event.target.value; return; }
-    if(event.target.name==="server") { this.data=await this.request("status",{entry_id:event.target.value});this.items=[];this.trail=[];this.render();return; }
+    if(event.target.name==="server") { this.data=await this.request("status",{entry_id:event.target.value});this.items=[];this.trail=[];this.backStack=[];this.notice="";this.render();return; }
     if(event.target.name==="volume") return this.run(()=>this.hass.callService("media_player","volume_set",{entity_id:this.playerEntity(),volume_level:Number(event.target.value)}));
     if(event.target.name==="output") return this.run(()=>this.hass.callService("media_player","select_source",{entity_id:this.playerEntity(),source:event.target.value}));
     if(event.target.name==="seek") return this.run(()=>this.hass.callService("media_player","media_seek",{entity_id:this.playerEntity(),seek_position:Number(event.target.value)}));
@@ -123,17 +137,21 @@ export class LxMusicPanel extends HTMLElement {
       <h3>Up next <span class="count">${songs.length}</span></h3>${songs.length?songs.map(s=>`<div class="row">${this.image(s.img,"thumb")}<div class="copy"><strong>${escapeHTML(s.name)}</strong><small>${escapeHTML(s.singer)}</small></div><small>${escapeHTML(s.interval)}</small></div>`).join(""):'<p class="empty">The queue is empty.</p>'}`;
   }
   browseMarkup() {
-    const rows=this.items.map((item,index)=>`<div class="row">${this.image(item.img,"thumb")}<div class="copy"><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.singer || item.author || (item.total?`${item.total} tracks`:"Playlist"))}</small></div>${this.button(this.kind==="playlists"?"open":"track",this.kind==="playlists"?"chevron-right":"play",this.kind==="playlists"?"Open playlist":"Play track",`data-index="${index}"`)}</div>`).join("");
-    return `<form class="search"><input name="query" aria-label="Search music" placeholder="Search songs or artists" value="${escapeHTML(this.query)}" maxlength="200"><select name="source" aria-label="Music source">${[["kw","Kuwo"],["wy","NetEase"],["tx","QQ"],["kg","Kugou"],["mg","Migu"]].map(([v,n])=>`<option value="${v}" ${v===this.source?"selected":""}>${n}</option>`).join("")}</select><button title="Search" aria-label="Search" ${this.busy?"disabled":""}>${this.icon("magnify")}</button></form>
+    const tracks=this.kind==="tracks";
+    const rows=this.items.map((item,index)=>`<div class="row">${this.image(item.img,"thumb")}<div class="copy"><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.singer || item.author || (item.total?`${item.total} tracks`:this.kind==="artists"?"Artist":"Playlist"))}</small></div><div class="row-actions">${this.button(tracks?"track":"open",tracks?"play":"chevron-right",tracks?"Play track":this.kind==="artists"?"Open artist":"Open playlist",`data-index="${index}"`)}${this.button("enqueue","playlist-plus",tracks?"Add track to queue":this.kind==="artists"?"Add artist tracks to queue":"Add playlist to queue",`data-index="${index}"`)}</div></div>`).join("");
+    return `<div class="search-types" role="group" aria-label="Search type">${[["song","music-note","Songs"],["artist","account-music","Artists"],["playlist","playlist-music","Playlists"]].map(([type,icon,label])=>`<button type="button" data-search-type="${type}" aria-pressed="${this.searchType===type}" ${this.busy?"disabled":""}>${this.icon(icon)}${label}</button>`).join("")}</div>
+    <form class="search"><input name="query" aria-label="Search music" placeholder="Search ${this.searchType==="artist"?"artists":this.searchType==="playlist"?"playlists":"songs"}" value="${escapeHTML(this.query)}" maxlength="200"><select name="source" aria-label="Music source" ${this.busy?"disabled":""}>${[["kw","Kuwo"],["wy","NetEase"],["tx","QQ"],["kg","Kugou"],["mg","Migu"]].filter(([v])=>this.sources().includes(v)).map(([v,n])=>`<option value="${v}" ${v===this.source?"selected":""}>${n}</option>`).join("")}</select><button title="Search" aria-label="Search" ${this.busy?"disabled":""}>${this.icon("magnify")}</button></form>
     <div class="browse-links"><button data-action="favorites">${this.icon("heart-outline")} Favorites</button><button data-action="popular">${this.icon("compass-outline")} Popular playlists</button></div>
     ${this.trail.length?`<div class="breadcrumb">${this.button("back","arrow-left","Back to browse")}<h3>${escapeHTML(this.trail.at(-1))}</h3></div>`:""}
-    <div class="results" aria-live="polite">${rows||`<p class="empty">${this.busy?"Loading music…":this.trail.length?"No playlists yet.":this.query?"No results.":"Your music starts here."}</p>`}</div>`;
+    ${tracks&&this.items.length?`<div class="result-tools"><span>${this.items.length} tracks</span>${this.button("enqueue-all","playlist-plus","Add all results to queue")}</div>`:""}
+    <div class="results" aria-live="polite">${rows||`<p class="empty">${this.busy?"Loading music…":this.trail.length?"No music yet.":this.query?"No results.":"Your music starts here."}</p>`}</div>`;
   }
   render() {
     const content=`<style>
       :host{display:block;height:100%;overflow:auto;background:var(--primary-background-color,#f5f6f8);color:var(--primary-text-color,#20242b);font-family:var(--paper-font-body1_-_font-family,Roboto,Arial,sans-serif);letter-spacing:0;color-scheme:light dark}*{box-sizing:border-box}button,input,select{font:inherit;color:inherit}button,a,input,select{touch-action:manipulation}button{cursor:pointer;border:0;background:transparent;min-width:44px;min-height:44px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:8px}button:hover{background:var(--secondary-background-color,#e8ebef)}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--primary-color,#4a90e2);outline-offset:2px}button:disabled{opacity:.45;cursor:wait}ha-icon{--mdc-icon-size:24px;flex-shrink:0}header{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff)}header h1{font-size:20px;margin:0;font-weight:500}header img{width:32px;height:32px}main{max-width:1024px;margin:auto;padding:24px}nav{display:flex;gap:8px;border-bottom:1px solid var(--divider-color,#ddd);margin-bottom:24px;overflow:auto}nav button{border-radius:0;flex:1;min-width:74px;padding:12px 8px;border-bottom:3px solid transparent}nav button[aria-selected=true]{border-bottom-color:var(--primary-color,#4a90e2);color:var(--primary-color,#4a90e2)}h2{font-size:26px;line-height:1.25;margin:8px 0;overflow-wrap:anywhere}h3{font-size:16px;font-weight:500}.now-playing{display:grid;grid-template-columns:minmax(180px,320px) minmax(0,1fr);align-items:center;gap:32px;padding:12px 0 32px}.cover{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.brand{object-fit:contain;padding:32px;background:var(--card-background-color,#fff)}.placeholder{display:grid;place-items:center;background:var(--secondary-background-color,#e8ebef);color:var(--secondary-text-color,#667)}.placeholder ha-icon{--mdc-icon-size:40px}.eyebrow,.state,small{font-size:13px;color:var(--secondary-text-color,#667)}p{color:var(--secondary-text-color,#667);line-height:1.5}.transport{display:flex;align-items:center;gap:16px;margin:24px 0}.transport button.primary{width:64px;height:64px;border-radius:50%;background:var(--primary-color,#4a90e2);color:var(--text-primary-color,#fff)}.volume{display:flex;align-items:center;gap:12px}.volume input{min-width:0;flex:1;accent-color:var(--primary-color,#4a90e2)}.volume output{min-width:44px;text-align:right;font-size:13px}.search{display:flex;gap:8px;margin-bottom:16px}.search input{flex:1;min-width:0}.search input,select{height:44px;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ddd);border-radius:6px;padding:0 12px}.browse-links{display:flex;gap:12px;flex-wrap:wrap}.browse-links button{padding:0 12px}.breadcrumb{display:flex;align-items:center;gap:8px;margin-top:20px}.row{display:flex;gap:12px;align-items:center;min-height:70px;padding:10px 0;border-bottom:1px solid var(--divider-color,#ddd)}.thumb{width:48px;height:48px;aspect-ratio:1;object-fit:cover;border-radius:4px;flex-shrink:0}.copy{flex:1;min-width:0}.copy strong,.copy small{display:block;overflow-wrap:anywhere}.copy strong{font-size:14px;font-weight:500;line-height:1.4}.copy small{margin-top:4px}.empty{padding:48px 0;text-align:center}.count{font-size:13px;color:var(--secondary-text-color,#667);margin-left:8px}.error{padding:12px;border-left:3px solid var(--error-color,#c33);background:var(--card-background-color,#fff);margin-bottom:16px;overflow-wrap:anywhere}a{color:var(--primary-color,#4a90e2);text-decoration:none;display:inline-flex;align-items:center;gap:8px;min-height:44px}.settings-line{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;border-bottom:1px solid var(--divider-color,#ddd)}.settings-line span:last-child{color:var(--secondary-text-color,#667);text-align:right;overflow-wrap:anywhere}section select[name=server]{max-width:100%}@media(max-width:600px){main{padding:16px}.now-playing{grid-template-columns:1fr;gap:20px}.cover{max-width:260px;justify-self:center}.track-details{width:100%}h2{font-size:22px}nav button{flex-direction:column;gap:4px;font-size:12px}header{height:56px}.search{flex-wrap:wrap}.search input{flex-basis:calc(100% - 56px);order:0}.search button{order:1}.search select{order:2;width:100%}.settings-line{align-items:flex-start;padding:12px 0}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
       .output{display:flex;align-items:center;gap:12px;margin-top:20px}.output select{flex:1;min-width:0;width:100%;text-overflow:ellipsis}
       .progress{display:flex;flex-wrap:wrap;gap:4px;margin-top:16px}.progress input{width:100%;accent-color:var(--primary-color,#4a90e2)}.progress span{font-size:12px;color:var(--secondary-text-color,#667)}
+      .search-types{display:flex;border-bottom:1px solid var(--divider-color,#ddd);margin-bottom:12px}.search-types button{flex:1;min-width:0;border-radius:0;font-size:13px;gap:6px;border-bottom:2px solid transparent}.search-types button[aria-pressed=true]{border-bottom-color:var(--primary-color,#4a90e2);color:var(--primary-color,#4a90e2)}.search-types ha-icon{--mdc-icon-size:20px}.row-actions{display:flex;flex-shrink:0;gap:0}.row-actions button{width:44px}.result-tools{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--secondary-text-color,#667);margin-top:12px}.notice{padding:8px 0;color:var(--primary-text-color,#20242b);font-size:13px}
       :host([data-card]){height:auto;overflow:visible;background:transparent}:host([data-card]) ha-card{display:block;overflow:hidden;border-radius:8px}
       :host([data-card]) header{height:56px;padding:0 16px}:host([data-card]) header h1{font-size:18px}:host([data-card]) header img{width:28px;height:28px}
       :host([data-card]) main{padding:16px;container-type:inline-size}:host([data-card]) nav{gap:0;margin-bottom:16px}:host([data-card]) nav button{flex-direction:column;gap:4px;font-size:12px;min-width:0;padding:8px}
@@ -146,6 +164,7 @@ export class LxMusicPanel extends HTMLElement {
     </style><header>${this.cardMode?"":this.button("menu","menu","Open sidebar")}<img src="/lxserver_cast_frontend/icon.png" alt=""><h1>${escapeHTML(this._config?.name||"LX Music")}</h1></header><main>
     <nav role="tablist" aria-label="LX Music">${[["player","play-circle-outline","Player"],["browse","magnify","Browse"],["queue","playlist-music","Queue"],["settings","cog-outline","Settings"]].map(([key,icon,label])=>`<button role="tab" data-tab="${key}" aria-selected="${this.tab===key}">${this.icon(icon)}${label}</button>`).join("")}</nav>
     ${this.error?`<div role="alert" class="error">${escapeHTML(this.error)}</div>`:""}
+    ${this.notice?`<div role="status" class="notice">${escapeHTML(this.notice)}</div>`:""}
     ${!this.data?'<p class="empty">Connecting to LX Server…</p>':this.tab==="player"?`<div id="player">${this.playerMarkup()}</div>`:this.tab==="browse"?this.browseMarkup():this.tab==="queue"?`<div id="queue">${this.queueMarkup()}</div>`:`<section><h3>Library</h3><select name="server" aria-label="LX Server account">${this.data.entries.map(e=>`<option value="${escapeHTML(e.entry_id)}" ${e.entry_id===this.data.entry_id?"selected":""}>${escapeHTML(e.title)}</option>`).join("")}</select><div class="settings-line"><span>Output</span><span>${escapeHTML(this.hass?.states?.[this.data.target]?.attributes?.friendly_name||"No output selected")}</span></div><div class="settings-line"><span>Audio quality</span><span>${escapeHTML(this.data.quality)}</span></div><div class="settings-line"><span>Default volume</span><span>${Math.round(this.data.volume*100)}%</span></div><p><a data-nav="true" href="/config/integrations/integration/lxserver_cast">${this.icon("tune")} Integration settings</a></p></section>`}
     </main>`;
     this.shadowRoot.innerHTML=this.cardMode?`<ha-card>${content}</ha-card>`:content;

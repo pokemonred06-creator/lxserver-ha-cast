@@ -80,3 +80,43 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await self.player.previous()
         self.assertEqual(self.player.current_title, "A")
         self.assertEqual([song["name"] for song in self.player.snapshot["upcoming"]], ["B"])
+
+    async def test_enqueue_during_playback_preserves_current_grant_and_order(self):
+        await self.player.start([{"name": "A"}, {"name": "B"}], shuffle=False, volume=0.1)
+        self.hass.services.async_call.reset_mock()
+        await self.player.enqueue([{"name": "C"}, {"name": "D"}])
+        self.assertEqual(self.player.current_title, "A")
+        self.assertEqual([s["name"] for s in self.player.snapshot["upcoming"]], ["B", "C", "D"])
+        self.hass.services.async_call.assert_not_awaited()
+        self.client.revoke_grant.assert_not_awaited()
+        self.assertEqual(self.client.cast_stream.await_count, 1)
+        await self.player.skip()
+        self.assertEqual(self.player.current_title, "B")
+
+    async def test_idle_enqueue_waits_for_play_and_ignores_late_advance(self):
+        await self.player.enqueue([{"name": "A"}, {"name": "B"}])
+        await self.player._advance()
+        self.assertIsNone(self.player.current_title)
+        self.client.cast_stream.assert_not_awaited()
+        self.hass.services.async_call.assert_not_awaited()
+        self.assertTrue(await self.player.play_staged(volume=0.2))
+        self.assertEqual(self.player.current_title, "A")
+        self.assertEqual([s["name"] for s in self.player.snapshot["upcoming"]], ["B"])
+        self.assertFalse(await self.player.play_staged(volume=0.2))
+        self.assertEqual(self.client.cast_stream.await_count, 1)
+
+    async def test_concurrent_appends_keep_both_batches(self):
+        await asyncio.gather(self.player.enqueue([{"name": "A"}]), self.player.enqueue([{"name": "B"}]))
+        self.assertEqual([s["name"] for s in self.player.snapshot["upcoming"]], ["A", "B"])
+
+    async def test_queue_limit_is_atomic(self):
+        await self.player.enqueue([{"name": "A"}] * 999)
+        with self.assertRaises(player_module.LxServerError):
+            await self.player.enqueue([{"name": "B"}, {"name": "C"}])
+        self.assertEqual(len(self.player.snapshot["upcoming"]), 999)
+
+    async def test_stop_clears_staged_queue(self):
+        await self.player.enqueue([{"name": "A"}])
+        await self.player.stop()
+        self.assertFalse(await self.player.play_staged(volume=0.2))
+        self.assertEqual(self.player.snapshot, {"current": None, "upcoming": []})

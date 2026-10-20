@@ -34,6 +34,15 @@ class PlaybackQueueTests(unittest.TestCase):
         queue.next()
         self.assertEqual(queue.remaining, 1)
 
+    def test_append_preserves_position_and_history(self) -> None:
+        queue = playlist.PlaybackQueue(["a", "b"])
+        queue.next()
+        queue.append(["c", "d"])
+        self.assertEqual(queue.upcoming, ["b", "c", "d"])
+        self.assertEqual(queue.next(), "b")
+        queue.rewind()
+        self.assertEqual(queue.next(), "a")
+
 
 if __name__ == "__main__":
     unittest.main()

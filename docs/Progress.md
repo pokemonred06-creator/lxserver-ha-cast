@@ -1,5 +1,15 @@
 # Current Progress
 
+## Typed Search and Queue - 0.4.0
+
+- [x] Songs, Artists and Playlists selector with supported source filtering.
+- [x] Artist/playlist drill-down and Back restoring previous results.
+- [x] Per-song, artist, playlist and all-results enqueue controls with count feedback.
+- [x] Serialized append, idle staging and native Play support; no receiver commands on enqueue.
+- [x] Backend tests: 50 pass, including sanitization, stale batches, source capabilities, queue ordering and capacity.
+- [ ] Browser verification at desktop and mobile widths.
+- [ ] Back up, deploy and verify Home Assistant; publish HACS release.
+
 ## Complete Dashboard Card - 0.3.0
 
 - [x] Bundle `custom:lx-music-card` and its visual editor in the integration.

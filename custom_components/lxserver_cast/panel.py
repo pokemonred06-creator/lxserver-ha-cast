@@ -12,7 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .lxserver import LxServerError
+from .lxserver import LxServerError, LxQueueFullError, SEARCH_SOURCES
 
 ASSET_URL = "/lxserver_cast_frontend"
 
@@ -28,14 +28,14 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         [StaticPathConfig(ASSET_URL, str(Path(__file__).parent / "frontend"), False)]
     )
     websocket_api.async_register_command(hass, handle_panel)
-    frontend.add_extra_js_url(hass, f"{ASSET_URL}/card.js?v=0.3.0")
+    frontend.add_extra_js_url(hass, f"{ASSET_URL}/card.js?v=0.4.0")
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path="lx-music",
         webcomponent_name="lx-music-panel",
         sidebar_title="LX Music",
         sidebar_icon="mdi:music-box-multiple",
-        module_url=f"{ASSET_URL}/panel.js?v=0.3.0",
+        module_url=f"{ASSET_URL}/panel.js?v=0.4.0",
         require_admin=True,
         config_panel_domain=DOMAIN,
     )
@@ -44,12 +44,14 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "lxserver_cast/panel",
-        vol.Required("action"): vol.In(["status", "search", "popular", "playlist", "play"]),
+        vol.Required("action"): vol.In(["status", "search", "popular", "playlist", "artist", "play", "enqueue"]),
         vol.Optional("entry_id"): str,
         vol.Optional("query", default=""): vol.All(str, vol.Length(max=200)),
         vol.Optional("source", default="wy"): vol.In(["wy", "kw", "tx", "kg", "mg"]),
         vol.Optional("list_id", default=""): vol.All(str, vol.Length(max=256)),
         vol.Optional("track_id", default=""): str,
+        vol.Optional("search_type", default="song"): vol.In(["song", "artist", "playlist"]),
+        vol.Optional("track_ids", default=[]): vol.All([str], vol.Length(max=200)),
     }
 )
 @websocket_api.require_admin
@@ -77,16 +79,32 @@ async def handle_panel(hass, connection, msg) -> None:
                 "current": _display(snapshot["current"]),
                 "upcoming": [_display(s) for s in snapshot["upcoming"]],
                 "favorites": [{"name": f.name, "id": f.list_id, "source": f.source} for f in runtime.favorites],
+                "search_sources": SEARCH_SOURCES,
             }
         elif action == "popular":
             items = await runtime.client.popular_playlists(msg["source"])
             result = [{k: s.get(k) for k in ("id", "name", "img", "author", "total")} for s in items]
-        elif action in ("search", "playlist"):
+        elif action in ("search", "playlist", "artist"):
             if action == "search":
                 if not msg["query"].strip():
                     connection.send_error(msg["id"], "invalid_query", "Enter a search")
                     return
-                songs = await runtime.client.search(msg["query"], source=msg["source"], limit=20)
+                kind = msg["search_type"]
+                if msg["source"] not in SEARCH_SOURCES[kind]:
+                    connection.send_error(msg["id"], "unsupported_source", "Choose a supported music source")
+                    return
+                songs = await runtime.client.search(msg["query"], source=msg["source"], limit=20, kind=kind)
+                if kind != "song":
+                    result = [{
+                        "id": str(item["id"]), "source": msg["source"], "name": item.get("name"),
+                        "img": item.get("picUrl") or item.get("img"),
+                        "author": item.get("creator") or item.get("author"),
+                        "total": item.get("trackCount") or item.get("total"),
+                    } for item in songs if item.get("id") is not None]
+                    connection.send_result(msg["id"], result)
+                    return
+            elif action == "artist":
+                songs = await runtime.client.artist_tracks(msg["source"], msg["list_id"])
             else:
                 songs = await runtime.client.songlist_tracks(msg["source"], msg["list_id"])
             result = []
@@ -97,15 +115,23 @@ async def handle_panel(hass, connection, msg) -> None:
             while len(runtime.ui_tracks) > 1000:
                 del runtime.ui_tracks[next(iter(runtime.ui_tracks))]
         else:
-            song = runtime.ui_tracks.get(msg["track_id"])
-            if song is None:
-                connection.send_error(msg["id"], "expired", "Refresh the results and choose the track again")
+            keys = msg["track_ids"] or [msg["track_id"]]
+            songs = [runtime.ui_tracks.get(key) for key in keys]
+            if not songs or any(song is None for song in songs):
+                connection.send_error(msg["id"], "expired", "Refresh the results and choose the tracks again")
                 return
             if not runtime.default_target:
-                connection.send_error(msg["id"], "no_target", "Choose an output in integration settings")
+                connection.send_error(msg["id"], "no_target", "Choose a Cast output in Player")
                 return
-            await runtime.player_for(runtime.default_target).start([song], shuffle=False, volume=runtime.default_volume)
-            result = {"started": True}
+            player = runtime.player_for(runtime.default_target)
+            if action == "enqueue":
+                await player.enqueue(songs)
+                result = {"queued": len(songs)}
+            else:
+                await player.start(songs, shuffle=False, volume=runtime.default_volume)
+                result = {"started": True}
         connection.send_result(msg["id"], result)
+    except LxQueueFullError:
+        connection.send_error(msg["id"], "queue_full", "The queue is full (1000 upcoming tracks). Wait for tracks to finish or clear it with Stop.")
     except LxServerError:
         connection.send_error(msg["id"], "server_error", "LX Server could not complete this request")

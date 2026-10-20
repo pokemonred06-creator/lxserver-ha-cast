@@ -36,3 +36,7 @@ class PlaybackQueue(Generic[T]):
     def rewind(self) -> None:
         """Make the previous track the next item; restart the first at the boundary."""
         self._position = max(0, self._position - 2)
+
+    def append(self, items: Iterable[T]) -> None:
+        """Append in order without changing the current position or history."""
+        self._items.extend(items)
