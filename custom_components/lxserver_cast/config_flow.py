@@ -25,18 +25,21 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_FAVORITES,
     CONF_PASSWORD,
     CONF_QUALITY,
     CONF_TARGET,
     CONF_URL,
     CONF_USERNAME,
     CONF_VOLUME,
+    DEFAULT_FAVORITES,
     DEFAULT_QUALITY,
     DEFAULT_VOLUME,
     DOMAIN,
     QUALITY_OPTIONS,
 )
 from .lxserver import LxServerAuthError, LxServerClient, LxServerError
+from .media import parse_favorites
 from .transport import AiohttpTransport
 
 USER_SCHEMA = vol.Schema(
@@ -60,6 +63,9 @@ def _options_schema(current: Mapping[str, Any]) -> vol.Schema:
             vol.Required(CONF_QUALITY, default=current.get(CONF_QUALITY, DEFAULT_QUALITY)): SelectSelector(
                 SelectSelectorConfig(options=QUALITY_OPTIONS, mode=SelectSelectorMode.DROPDOWN)
             ),
+            vol.Optional(
+                CONF_FAVORITES, default=current.get(CONF_FAVORITES, DEFAULT_FAVORITES)
+            ): TextSelector(TextSelectorConfig(multiline=True)),
         }
     )
 
@@ -98,6 +104,14 @@ class LxServerCastConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class LxServerCastOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(data=user_input)
-        return self.async_show_form(step_id="init", data_schema=_options_schema(self.config_entry.options))
+        if user_input is None:
+            return self.async_show_form(step_id="init", data_schema=_options_schema(self.config_entry.options))
+        try:
+            parse_favorites(user_input.get(CONF_FAVORITES, ""))
+        except ValueError:
+            return self.async_show_form(
+                step_id="init",
+                data_schema=_options_schema(user_input),
+                errors={"base": "invalid_favorites"},
+            )
+        return self.async_create_entry(data=user_input)

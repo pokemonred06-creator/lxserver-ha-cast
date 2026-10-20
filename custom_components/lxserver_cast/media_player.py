@@ -1,4 +1,4 @@
-"""LX Server media player. Sends playback to the default Cast device."""
+"""LX Server media player: browse lxserver and send playback to the default Cast device."""
 
 from __future__ import annotations
 
@@ -9,15 +9,19 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
+from homeassistant.components.media_player.browse_media import BrowseMedia
+from homeassistant.components.media_player.const import MediaClass
+from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from . import LxRuntime
-from .const import CONF_VOLUME, DEFAULT_SEARCH_SOURCE, DEFAULT_VOLUME, DOMAIN
-from .media import PlaylistRequest, parse_media
+from . import LxRuntime, device_info
+from .const import BROWSE_SOURCE, CONF_VOLUME, DEFAULT_VOLUME, DOMAIN, MAX_PLAYLIST_TRACKS
+from .lxserver import LxServerError
+from .media import FAVORITES_ID, FOLDER_TYPE, PLAYLIST_TYPE, POPULAR_ID, TRACK_TYPE, parse_media, track_id
 
 _STATE_MAP = {
     "playing": MediaPlayerState.PLAYING,
@@ -26,7 +30,6 @@ _STATE_MAP = {
     "idle": MediaPlayerState.IDLE,
     "off": MediaPlayerState.OFF,
 }
-_MAX_PLAYLIST_TRACKS = 200
 
 
 async def async_setup_entry(
@@ -35,11 +38,113 @@ async def async_setup_entry(
     async_add_entities([LxServerMediaPlayer(entry)])
 
 
+def _folder(content_id: str, title: str) -> BrowseMedia:
+    return BrowseMedia(
+        media_class=MediaClass.DIRECTORY,
+        media_content_type=FOLDER_TYPE,
+        media_content_id=content_id,
+        title=title,
+        can_play=False,
+        can_expand=True,
+    )
+
+
+def _listing(content_id: str, title: str, children: list[BrowseMedia]) -> BrowseMedia:
+    return BrowseMedia(
+        media_class=MediaClass.DIRECTORY,
+        media_content_type=FOLDER_TYPE,
+        media_content_id=content_id,
+        title=title,
+        can_play=False,
+        can_expand=True,
+        children=children,
+        children_media_class=MediaClass.PLAYLIST,
+    )
+
+
+def _playlist(source: str, list_id: str, title: str, thumbnail: str | None = None) -> BrowseMedia:
+    return BrowseMedia(
+        media_class=MediaClass.PLAYLIST,
+        media_content_type=PLAYLIST_TYPE,
+        media_content_id=f"{source}:{list_id}",
+        title=title,
+        can_play=True,
+        can_expand=True,
+        thumbnail=thumbnail,
+    )
+
+
+async def _playlist_node(runtime: LxRuntime, source: str, list_id: str) -> BrowseMedia:
+    songs = await runtime.client.songlist_tracks(source, list_id)
+    children: list[BrowseMedia] = []
+    for index, song in enumerate(songs[:MAX_PLAYLIST_TRACKS]):
+        name = str(song.get("name") or "Track")
+        singer = song.get("singer")
+        children.append(
+            BrowseMedia(
+                media_class=MediaClass.TRACK,
+                media_content_type=TRACK_TYPE,
+                media_content_id=track_id(source, list_id, index),
+                title=f"{name} - {singer}" if singer else name,
+                can_play=True,
+                can_expand=False,
+                thumbnail=song.get("img"),
+            )
+        )
+    return BrowseMedia(
+        media_class=MediaClass.PLAYLIST,
+        media_content_type=PLAYLIST_TYPE,
+        media_content_id=f"{source}:{list_id}",
+        title="Tracks",
+        can_play=True,
+        can_expand=True,
+        children=children,
+        children_media_class=MediaClass.TRACK,
+    )
+
+
+async def _browse(runtime: LxRuntime, content_type: str | None, content_id: str | None) -> BrowseMedia:
+    if not content_id:
+        children = []
+        if runtime.favorites:
+            children.append(_folder(FAVORITES_ID, "Favorites"))
+        children.append(_folder(POPULAR_ID, "Popular playlists"))
+        return BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_type=FOLDER_TYPE,
+            media_content_id="",
+            title="LX Server",
+            can_play=False,
+            can_expand=True,
+            children=children,
+            children_media_class=MediaClass.DIRECTORY,
+        )
+    if content_type == PLAYLIST_TYPE:
+        request = parse_media(PLAYLIST_TYPE, content_id)
+        return await _playlist_node(runtime, request.source, request.list_id)
+    if content_id == FAVORITES_ID:
+        return _listing(FAVORITES_ID, "Favorites", [_playlist(f.source, f.list_id, f.name) for f in runtime.favorites])
+    if content_id == POPULAR_ID:
+        items = await runtime.client.popular_playlists(BROWSE_SOURCE)
+        children = [
+            _playlist(BROWSE_SOURCE, str(item["id"]), str(item.get("name") or "Playlist"), item.get("img"))
+            for item in items
+            if item.get("id")
+        ]
+        return _listing(POPULAR_ID, "Popular playlists", children)
+    raise BrowseError(f"Unknown LX Server item: {content_id}")
+
+
 class LxServerMediaPlayer(MediaPlayerEntity):
-    _attr_name = "LX Server"
+    _attr_has_entity_name = True
+    _attr_name = None
     _attr_icon = "mdi:music-box-multiple"
     _attr_supported_features = (
         MediaPlayerEntityFeature.PLAY_MEDIA
+        | MediaPlayerEntityFeature.BROWSE_MEDIA
+        | MediaPlayerEntityFeature.PLAY
+        | MediaPlayerEntityFeature.PAUSE
+        | MediaPlayerEntityFeature.NEXT_TRACK
         | MediaPlayerEntityFeature.STOP
         | MediaPlayerEntityFeature.VOLUME_SET
     )
@@ -47,6 +152,7 @@ class LxServerMediaPlayer(MediaPlayerEntity):
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry_id = entry.entry_id
         self._attr_unique_id = entry.entry_id
+        self._attr_device_info = device_info(entry.entry_id)
         self._attr_volume_level = float(entry.options.get(CONF_VOLUME, DEFAULT_VOLUME))
 
     def _runtime(self) -> LxRuntime | None:
@@ -66,8 +172,8 @@ class LxServerMediaPlayer(MediaPlayerEntity):
 
     @property
     def available(self) -> bool:
-        runtime = self._runtime()
-        return runtime is not None and bool(runtime.default_target)
+        # Browsing works without a Cast target. Only playback needs one.
+        return self._runtime() is not None
 
     @property
     def state(self) -> MediaPlayerState:
@@ -97,6 +203,17 @@ class LxServerMediaPlayer(MediaPlayerEntity):
     def _on_target_change(self, event: Event) -> None:
         self.async_write_ha_state()
 
+    async def async_browse_media(
+        self, media_content_type: str | None = None, media_content_id: str | None = None
+    ) -> BrowseMedia:
+        runtime = self._runtime()
+        if runtime is None:
+            raise BrowseError("LX Server Cast is not loaded")
+        try:
+            return await _browse(runtime, media_content_type, media_content_id)
+        except (LxServerError, ValueError) as err:
+            raise BrowseError(str(err)) from err
+
     async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
         runtime = self._require_runtime()
         target = self._require_target(runtime)
@@ -104,15 +221,26 @@ class LxServerMediaPlayer(MediaPlayerEntity):
             request = parse_media(media_type, media_id)
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
-        if isinstance(request, PlaylistRequest):
-            songs = await runtime.client.songlist_tracks(request.source, request.list_id)
-            songs = songs[:_MAX_PLAYLIST_TRACKS]
-        else:
-            songs = (await runtime.client.search(request.query, source=DEFAULT_SEARCH_SOURCE))[:1]
-        if not songs:
-            raise ServiceValidationError("lxserver returned no tracks for that request")
         volume = self.volume_level if self.volume_level is not None else runtime.default_volume
-        await runtime.player_for(target).start(songs, shuffle=False, volume=volume)
+        await runtime.play(request, target, volume)
+        self.async_write_ha_state()
+
+    async def _forward(self, service: str) -> None:
+        runtime = self._require_runtime()
+        target = self._require_target(runtime)
+        await self.hass.services.async_call("media_player", service, {"entity_id": target}, blocking=True)
+
+    async def async_media_play(self) -> None:
+        await self._forward("media_play")
+        self.async_write_ha_state()
+
+    async def async_media_pause(self) -> None:
+        await self._forward("media_pause")
+        self.async_write_ha_state()
+
+    async def async_media_next_track(self) -> None:
+        runtime = self._require_runtime()
+        await runtime.player_for(self._require_target(runtime)).skip()
         self.async_write_ha_state()
 
     async def async_media_stop(self) -> None:

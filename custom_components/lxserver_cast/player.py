@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _ACTIVE_STATES = {"playing", "buffering", "paused"}
 _FINISHED_STATES = {"idle", "off"}
+# A Cast device can briefly report idle while it swaps tracks. Ignore that window.
+_SWITCH_GRACE_S = 8.0
 
 
 class CastQueuePlayer:
@@ -30,6 +33,7 @@ class CastQueuePlayer:
         self._grant_id: str | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._current_title: str | None = None
+        self._started_at = 0.0
 
     @property
     def current_title(self) -> str | None:
@@ -45,6 +49,16 @@ class CastQueuePlayer:
     async def stop(self) -> None:
         await self.release()
         await self._call("media_player", "media_stop", {"entity_id": self._target})
+
+    async def skip(self) -> None:
+        """Start the next queued track now. Stops playback when nothing is left."""
+        queue = self._queue
+        if queue is None:
+            return
+        if queue.remaining == 0:
+            await self.stop()
+            return
+        await self._play_next()
 
     async def release(self) -> None:
         """Stop advancing and revoke the current grant. Does not touch playback."""
@@ -64,6 +78,8 @@ class CastQueuePlayer:
         if old_state is None or new_state is None:
             return
         if old_state.state in _ACTIVE_STATES and new_state.state in _FINISHED_STATES:
+            if time.monotonic() - self._started_at < _SWITCH_GRACE_S:
+                return
             self._hass.async_create_task(self._advance())
 
     async def _advance(self) -> None:
@@ -89,6 +105,7 @@ class CastQueuePlayer:
             if previous is not None:
                 await self._client.revoke_grant(previous)
             self._current_title = song.get("name")
+            self._started_at = time.monotonic()
             await self._call(
                 "media_player",
                 "play_media",

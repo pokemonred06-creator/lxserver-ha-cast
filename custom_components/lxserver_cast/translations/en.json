@@ -26,9 +26,16 @@
         "data": {
           "target": "Default Cast device",
           "volume": "Default volume",
-          "quality": "Audio quality"
+          "quality": "Audio quality",
+          "favorites": "Favorite playlists"
+        },
+        "data_description": {
+          "favorites": "One per line as Name | source:playlist_id, for example Bedtime | wy:17879848678. Each favorite gets a button."
         }
       }
+    },
+    "error": {
+      "invalid_favorites": "Each favorite line must look like Name | wy:17879848678"
     }
   }
 }

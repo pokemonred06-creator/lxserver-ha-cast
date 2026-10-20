@@ -1,4 +1,4 @@
-"""Unit tests for media request parsing."""
+"""Unit tests for media request parsing and favorite playlists."""
 
 from __future__ import annotations
 
@@ -27,6 +27,21 @@ class ParseMediaTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             media.parse_media("playlist", "wy:")
 
+    def test_track_id_selects_index(self) -> None:
+        self.assertEqual(media.parse_media("lxserver_track", "wy:123:4"), media.TrackRequest("wy", "123", 4))
+
+    def test_track_id_helper_round_trips(self) -> None:
+        parsed = media.parse_media(media.TRACK_TYPE, media.track_id("wy", "9", 0))
+        self.assertEqual(parsed, media.TrackRequest("wy", "9", 0))
+
+    def test_track_without_index_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            media.parse_media("lxserver_track", "wy:123")
+
+    def test_track_with_non_numeric_index_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            media.parse_media("lxserver_track", "wy:123:x")
+
     def test_music_is_a_trimmed_search(self) -> None:
         self.assertEqual(media.parse_media("music", "  Mozart K467 "), media.SearchRequest("Mozart K467"))
 
@@ -40,6 +55,25 @@ class ParseMediaTests(unittest.TestCase):
     def test_empty_media_id_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             media.parse_media("music", "   ")
+
+
+class FavoritesTests(unittest.TestCase):
+    def test_named_and_bare_lines(self) -> None:
+        favorites = media.parse_favorites("Bedtime | wy:17879848678\n# comment\n\nwy:42")
+        self.assertEqual(
+            favorites,
+            [media.Favorite("Bedtime", "wy", "17879848678"), media.Favorite("42", "wy", "42")],
+        )
+
+    def test_duplicates_are_dropped(self) -> None:
+        self.assertEqual(len(media.parse_favorites("wy:1\nA | wy:1")), 1)
+
+    def test_bad_reference_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            media.parse_favorites("Bedtime | 17879848678")
+
+    def test_empty_text_is_empty_list(self) -> None:
+        self.assertEqual(media.parse_favorites(""), [])
 
 
 if __name__ == "__main__":

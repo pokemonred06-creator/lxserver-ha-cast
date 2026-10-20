@@ -9,7 +9,14 @@ Home Assistant integration that plays music from an lxserver (LX Music Server) o
 3. Download LX Server Cast and restart Home Assistant.
 4. Go to Settings, Devices and services, Add integration, and choose LX Server Cast.
 
-Before setup, create a dedicated user in the lxserver admin panel, and make sure the Cast device appears under Google Cast.
+Before setup, create a dedicated user in the lxserver admin panel and make sure the Cast device appears under Google Cast.
+
+## Using it
+
+- **Media browser:** open the LX Server media player and browse Favorites or Popular playlists. Open a playlist and pick a track to start from there.
+- **Player controls:** play, pause, next track, stop, and volume on the LX Server device.
+- **Buttons:** Next track, Stop playback, and one button per favorite playlist.
+- **Options:** default Cast device, default volume, audio quality, and favorite playlists. Enter favorites one per line as `Name | wy:17879848678`.
 
 ## Services
 
@@ -18,13 +25,6 @@ Before setup, create a dedicated user in the lxserver admin panel, and make sure
 - `lxserver_cast.stop`: stop playback and release the stream grant.
 
 Each track gets a fresh stream grant when it starts. Grants expire after two hours on the server.
-
-## Media player
-
-The integration adds an `LX Server` media player that sends playback to the default Cast device set in the options.
-
-- `media_player.play_media` with `media_content_type: playlist` and `media_content_id: wy:17879848678` (source:playlist ID) queues a playlist.
-- `media_player.play_media` with `media_content_type: music` and a search phrase plays the top match.
 
 ## Tests
 

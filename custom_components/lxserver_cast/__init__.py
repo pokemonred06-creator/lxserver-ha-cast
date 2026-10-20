@@ -1,4 +1,4 @@
-"""LX Server Cast: queue lxserver tracks on a Google Cast media player."""
+"""LX Server Cast: browse lxserver and queue its tracks on a Google Cast media player."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     ATTR_LIMIT,
@@ -24,26 +25,31 @@ from .const import (
     ATTR_SOURCE,
     ATTR_TARGET,
     ATTR_VOLUME,
+    CONF_FAVORITES,
     CONF_PASSWORD,
     CONF_QUALITY,
     CONF_TARGET,
     CONF_URL,
     CONF_USERNAME,
     CONF_VOLUME,
+    DEFAULT_FAVORITES,
     DEFAULT_QUALITY,
+    DEFAULT_SEARCH_SOURCE,
     DEFAULT_VOLUME,
     DOMAIN,
+    MAX_PLAYLIST_TRACKS,
     SERVICE_PLAY_SONGLIST,
     SERVICE_PLAY_TRACKS,
     SERVICE_STOP,
 )
 from .lxserver import LxServerClient, Song
+from .media import Favorite, PlaylistRequest, SearchRequest, TrackRequest, parse_favorites
 from .player import CastQueuePlayer
 from .transport import AiohttpTransport
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.MEDIA_PLAYER]
+PLATFORMS = [Platform.MEDIA_PLAYER, Platform.BUTTON]
 
 _VOLUME = vol.All(vol.Coerce(float), vol.Range(min=0, max=1))
 
@@ -61,7 +67,7 @@ PLAY_SONGLIST_SCHEMA = vol.Schema(
 PLAY_TRACKS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_QUERIES): vol.All(cv.ensure_list, [cv.string], vol.Length(min=1, max=50)),
-        vol.Optional(ATTR_SEARCH_SOURCE, default="kw"): cv.string,
+        vol.Optional(ATTR_SEARCH_SOURCE, default=DEFAULT_SEARCH_SOURCE): cv.string,
         vol.Optional(ATTR_TARGET): cv.entity_id,
         vol.Optional(ATTR_VOLUME): _VOLUME,
         vol.Optional(ATTR_SHUFFLE, default=False): cv.boolean,
@@ -70,22 +76,47 @@ PLAY_TRACKS_SCHEMA = vol.Schema(
 
 STOP_SCHEMA = vol.Schema({vol.Optional(ATTR_TARGET): cv.entity_id})
 
+PlayRequest = PlaylistRequest | TrackRequest | SearchRequest
+
 
 @dataclass
 class LxRuntime:
-    """State for one configured lxserver, shared by the services."""
+    """State for one configured lxserver, shared by the services and entities."""
 
     hass: HomeAssistant
     client: LxServerClient
     default_target: str | None
     default_volume: float
     quality: str
+    favorites: list[Favorite] = field(default_factory=list)
     players: dict[str, CastQueuePlayer] = field(default_factory=dict)
 
     def player_for(self, target: str) -> CastQueuePlayer:
         if target not in self.players:
             self.players[target] = CastQueuePlayer(self.hass, self.client, target, self.quality)
         return self.players[target]
+
+    async def resolve(self, request: PlayRequest) -> list[Song]:
+        if isinstance(request, SearchRequest):
+            return (await self.client.search(request.query, source=DEFAULT_SEARCH_SOURCE))[:1]
+        songs = await self.client.songlist_tracks(request.source, request.list_id)
+        start = request.index if isinstance(request, TrackRequest) else 0
+        return songs[start : start + MAX_PLAYLIST_TRACKS]
+
+    async def play(self, request: PlayRequest, target: str, volume: float) -> None:
+        songs = await self.resolve(request)
+        if not songs:
+            raise ServiceValidationError("lxserver returned no tracks for that request")
+        await self.player_for(target).start(songs, shuffle=False, volume=volume)
+
+
+def device_info(entry_id: str) -> DeviceInfo:
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry_id)},
+        name="LX Server",
+        manufacturer="LX Music",
+        model="lxserver",
+    )
 
 
 def _runtime(hass: HomeAssistant) -> LxRuntime:
@@ -154,12 +185,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_PASSWORD],
     )
     options = entry.options
+    try:
+        favorites = parse_favorites(options.get(CONF_FAVORITES, DEFAULT_FAVORITES))
+    except ValueError as err:
+        _LOGGER.warning("Ignoring favorite playlists: %s", err)
+        favorites = []
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = LxRuntime(
         hass=hass,
         client=client,
         default_target=options.get(CONF_TARGET) or None,
         default_volume=float(options.get(CONF_VOLUME, DEFAULT_VOLUME)),
         quality=options.get(CONF_QUALITY, DEFAULT_QUALITY),
+        favorites=favorites,
     )
     entry.async_on_unload(entry.add_update_listener(_reload_on_change))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

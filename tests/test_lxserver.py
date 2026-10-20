@@ -115,6 +115,14 @@ class LxServerClientTests(unittest.TestCase):
         asyncio.run(client.revoke_grant("g1"))
         self.assertEqual(transport.calls[1]["params"], {"id": "g1"})
 
+    def test_popular_playlists_requests_hot_list(self) -> None:
+        transport = ScriptedTransport([(200, {"token": "t"}), (200, {"list": [{"id": "1", "name": "A"}]})])
+        client = lxserver.LxServerClient(transport, BASE, "u", "p")
+        songs = asyncio.run(client.popular_playlists("wy"))
+        self.assertEqual(songs, [{"id": "1", "name": "A"}])
+        self.assertEqual(transport.calls[1]["path"], "/api/music/songList/list")
+        self.assertEqual(transport.calls[1]["params"]["sortId"], "hot")
+
 
 if __name__ == "__main__":
     unittest.main()

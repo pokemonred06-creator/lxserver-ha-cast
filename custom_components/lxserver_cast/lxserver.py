@@ -96,6 +96,14 @@ class LxServerClient:
         )
         return _songs(status, data, f"playlist {list_id}")
 
+    async def popular_playlists(self, source: str, *, page: int = 1) -> list[Song]:
+        status, data = await self._authed(
+            "GET",
+            "/api/music/songList/list",
+            params={"source": source, "sortId": "hot", "tagId": "", "page": page},
+        )
+        return _songs(status, data, "popular playlists")
+
     async def stream_url(self, song: Song, quality: str) -> str:
         status, data = await self._authed(
             "POST",
