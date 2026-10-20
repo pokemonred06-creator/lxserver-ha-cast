@@ -81,38 +81,3 @@ stop:
       selector:
         entity:
           domain: media_player
-*** Add File: /Users/server/Github/lxserver-ha/custom_components/lxserver_cast/translations/en.json
-{
-  "config": {
-    "step": {
-      "user": {
-        "title": "Connect to lxserver",
-        "description": "Use a dedicated lxserver user for Home Assistant.",
-        "data": {
-          "url": "Server URL",
-          "username": "Username",
-          "password": "Password"
-        }
-      }
-    },
-    "error": {
-      "invalid_auth": "Invalid username or password",
-      "cannot_connect": "Cannot reach lxserver"
-    },
-    "abort": {
-      "already_configured": "This lxserver account is already set up"
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Playback defaults",
-        "data": {
-          "target": "Default Cast device",
-          "volume": "Default volume",
-          "quality": "Audio quality"
-        }
-      }
-    }
-  }
-}
