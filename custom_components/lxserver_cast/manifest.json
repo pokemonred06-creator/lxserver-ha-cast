@@ -1,6 +1,9 @@
 {
   "domain": "lxserver_cast",
   "name": "LX Server Cast",
+  "codeowners": ["@pokemonred06-creator"],
+  "documentation": "https://github.com/pokemonred06-creator/lxserver-ha-cast",
+  "issue_tracker": "https://github.com/pokemonred06-creator/lxserver-ha-cast/issues",
   "config_flow": true,
   "after_dependencies": ["cast"],
   "iot_class": "local_polling",
