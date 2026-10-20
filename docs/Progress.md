@@ -9,7 +9,7 @@
 - [x] Back up and deploy the package to Home Assistant; Core check and restart succeeded.
 - [x] Verify live sidebar, entities, search and media browsing without playback.
 - [x] Live desktop/390px browser: tabs, search, artwork and no horizontal overflow.
-- [ ] Publish the tested HACS release.
+- [x] Publish the tested HACS release: v0.2.0, code be9d3e3; HACS and backend/frontend CI passed.
 
 Music selection, receiver changes and the morning automation are deferred at the user's request.
 
@@ -18,3 +18,4 @@ Music selection, receiver changes and the morning automation are deferred at the
 Home Assistant 2026.10.2. Backup: `/config/.audit-backups/lxserver-ui-20261020-153217`.
 Authenticated read-only verification passed for the sidebar, 20 search results, a 97-track playlist, native media browsing, both control buttons and frontend delivery. Temporary API login was revoked.
 Browser evidence is in ignored `output/playwright/`. No receiver playback was started during verification.
+Native Settings navigation and playlist detail/back navigation passed in the live browser. Console: no errors; desktop and 390px layouts verified. Browser rendering does not certify physical phone operation.
