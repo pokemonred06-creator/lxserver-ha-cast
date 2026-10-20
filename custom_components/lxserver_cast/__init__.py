@@ -90,8 +90,14 @@ class LxRuntime:
     quality: str
     favorites: list[Favorite] = field(default_factory=list)
     players: dict[str, CastQueuePlayer] = field(default_factory=dict)
+    ui_tracks: dict[str, Song] = field(default_factory=dict)
 
     def player_for(self, target: str) -> CastQueuePlayer:
+        from homeassistant.helpers import entity_registry as er
+
+        entity = er.async_get(self.hass).async_get(target)
+        if entity is not None and entity.platform == DOMAIN:
+            raise ServiceValidationError("Choose an output device, not the LX Server player")
         if target not in self.players:
             self.players[target] = CastQueuePlayer(self.hass, self.client, target, self.quality)
         return self.players[target]
@@ -170,6 +176,9 @@ async def _handle_stop(call: ServiceCall) -> None:
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    from .panel import async_setup_panel
+
+    await async_setup_panel(hass)
     hass.services.async_register(DOMAIN, SERVICE_PLAY_SONGLIST, _handle_play_songlist, schema=PLAY_SONGLIST_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_PLAY_TRACKS, _handle_play_tracks, schema=PLAY_TRACKS_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_STOP, _handle_stop, schema=STOP_SCHEMA)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 from collections.abc import Callable
 from typing import Any
@@ -34,31 +35,41 @@ class CastQueuePlayer:
         self._unsubscribe: Callable[[], None] | None = None
         self._current_title: str | None = None
         self._started_at = 0.0
+        self._current_song: Song | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def snapshot(self) -> dict[str, Any]:
+        return {"current": self._current_song, "upcoming": self._queue.upcoming if self._queue else []}
 
     @property
     def current_title(self) -> str | None:
         return self._current_title
 
     async def start(self, songs: list[Song], *, shuffle: bool, volume: float) -> None:
-        await self.release()
-        self._queue = PlaybackQueue(songs, shuffle=shuffle)
-        self._unsubscribe = async_track_state_change_event(self._hass, [self._target], self._on_state_change)
-        await self._call("media_player", "volume_set", {"entity_id": self._target, "volume_level": volume})
-        await self._play_next()
+        async with self._lock:
+            await self.release()
+            self._queue = PlaybackQueue(songs, shuffle=shuffle)
+            self._unsubscribe = async_track_state_change_event(self._hass, [self._target], self._on_state_change)
+            await self._call("media_player", "volume_set", {"entity_id": self._target, "volume_level": volume})
+            await self._play_next()
 
     async def stop(self) -> None:
-        await self.release()
-        await self._call("media_player", "media_stop", {"entity_id": self._target})
+        async with self._lock:
+            await self.release()
+            await self._call("media_player", "media_stop", {"entity_id": self._target})
 
     async def skip(self) -> None:
         """Start the next queued track now. Stops playback when nothing is left."""
-        queue = self._queue
-        if queue is None:
-            return
-        if queue.remaining == 0:
-            await self.stop()
-            return
-        await self._play_next()
+        async with self._lock:
+            queue = self._queue
+            if queue is None:
+                return
+            if queue.remaining == 0:
+                await self.release()
+                await self._call("media_player", "media_stop", {"entity_id": self._target})
+                return
+            await self._play_next()
 
     async def release(self) -> None:
         """Stop advancing and revoke the current grant. Does not touch playback."""
@@ -67,6 +78,7 @@ class CastQueuePlayer:
             self._unsubscribe = None
         self._queue = None
         self._current_title = None
+        self._current_song = None
         grant_id, self._grant_id = self._grant_id, None
         if grant_id is not None:
             await self._client.revoke_grant(grant_id)
@@ -84,7 +96,9 @@ class CastQueuePlayer:
 
     async def _advance(self) -> None:
         try:
-            await self._play_next()
+            async with self._lock:
+                if time.monotonic() - self._started_at >= _SWITCH_GRACE_S:
+                    await self._play_next()
         except Exception:
             _LOGGER.exception("Could not advance playback on %s", self._target)
 
@@ -101,10 +115,14 @@ class CastQueuePlayer:
             except LxServerError as err:
                 _LOGGER.warning("Skipping %s: %s", song.get("name", "track"), err)
                 continue
+            if self._queue is not queue:
+                await self._client.revoke_grant(grant_id)
+                return
             previous, self._grant_id = self._grant_id, grant_id
             if previous is not None:
                 await self._client.revoke_grant(previous)
             self._current_title = song.get("name")
+            self._current_song = song
             self._started_at = time.monotonic()
             await self._call(
                 "media_player",

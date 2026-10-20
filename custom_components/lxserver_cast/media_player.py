@@ -176,6 +176,10 @@ class LxServerMediaPlayer(MediaPlayerEntity):
         return self._runtime() is not None
 
     @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        return {"lxserver_entry_id": self._entry_id}
+
+    @property
     def state(self) -> MediaPlayerState:
         runtime = self._runtime()
         target = runtime.default_target if runtime else None

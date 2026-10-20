@@ -22,6 +22,10 @@ class PlaybackQueue(Generic[T]):
     def remaining(self) -> int:
         return len(self._items) - self._position
 
+    @property
+    def upcoming(self) -> list[T]:
+        return self._items[self._position :]
+
     def next(self) -> T | None:
         if self._position >= len(self._items):
             return None

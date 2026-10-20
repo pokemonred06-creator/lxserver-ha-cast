@@ -13,6 +13,8 @@ Before setup, create a dedicated user in the lxserver admin panel and make sure 
 
 ## Using it
 
+Open **LX Music** in the Home Assistant sidebar. The bundled interface includes Player, Browse, Queue and Settings tabs, song search, playlist navigation and playback controls. It follows your Home Assistant theme and works on phones. The sidebar is available to administrators.
+
 - **Media browser:** open the LX Server media player and browse Favorites or Popular playlists. Open a playlist and pick a track to start from there.
 - **Player controls:** play, pause, next track, stop, and volume on the LX Server device.
 - **Buttons:** Next track, Stop playback, and one button per favorite playlist.
