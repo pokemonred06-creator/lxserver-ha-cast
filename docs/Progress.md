@@ -9,9 +9,10 @@
 - [x] Save output selection without reloading the integration or transferring playback.
 - [x] Verify standalone card/editor at dashboard and phone widths; nine mocked controls, live search and editor changes pass with no receiver commands.
 - [x] Deploy package on HA 2026.10.2; 33 backend tests and JS/Python checks pass.
-- [ ] Publish the verified 0.3.0 HACS release.
+- [x] Publish v0.3.0 at tested code df8ffee; HACS and backend/frontend CI pass.
 
 Preview dashboard: `/lx-music-player/player` (administrator-only, no additional sidebar entry). Backup: `/config/.audit-backups/lxserver-card-20261020-161752`. Live output source list contains four Cast players; the selected RZ50 and morning automation were preserved. Screenshots: `output/playwright/lx-complete-card-desktop.png` and `lx-complete-card-phone.png`.
+All 19 package files match the live deployment. Card-picker registration, visual-editor changes, 20 search results and nine mocked control calls pass. The 320px layout has equal viewport/page widths and retains the Cast selector. Temporary API/browser logins were revoked; no receiver command was sent during card verification.
 
 ## Previous Sidebar Release
 
