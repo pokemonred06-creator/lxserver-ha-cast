@@ -1,0 +1,10 @@
+{
+  "domain": "lxserver_cast",
+  "name": "LX Server Cast",
+  "config_flow": true,
+  "after_dependencies": ["cast"],
+  "iot_class": "local_polling",
+  "integration_type": "service",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,118 @@
+play_songlist:
+  name: Play lxserver playlist
+  description: Queue the tracks of an online playlist on a Cast device.
+  fields:
+    source:
+      name: Source
+      description: lxserver source for the playlist, for example wy.
+      default: wy
+      selector:
+        text:
+    list_id:
+      name: Playlist ID
+      required: true
+      selector:
+        text:
+    target:
+      name: Media player
+      selector:
+        entity:
+          domain: media_player
+    volume:
+      name: Volume
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+          mode: slider
+    shuffle:
+      name: Shuffle
+      default: false
+      selector:
+        boolean:
+    limit:
+      name: Maximum tracks
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 200
+          mode: box
+play_tracks:
+  name: Play tracks by search
+  description: Search lxserver for each query and queue the top match.
+  fields:
+    queries:
+      name: Queries
+      required: true
+      selector:
+        text:
+          multiple: true
+    search_source:
+      name: Search source
+      default: kw
+      selector:
+        text:
+    target:
+      name: Media player
+      selector:
+        entity:
+          domain: media_player
+    volume:
+      name: Volume
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+          mode: slider
+    shuffle:
+      name: Shuffle
+      default: false
+      selector:
+        boolean:
+stop:
+  name: Stop
+  description: Stop playback and release the stream grant.
+  fields:
+    target:
+      name: Media player
+      selector:
+        entity:
+          domain: media_player
+*** Add File: /Users/server/Github/lxserver-ha/custom_components/lxserver_cast/translations/en.json
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to lxserver",
+        "description": "Use a dedicated lxserver user for Home Assistant.",
+        "data": {
+          "url": "Server URL",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid username or password",
+      "cannot_connect": "Cannot reach lxserver"
+    },
+    "abort": {
+      "already_configured": "This lxserver account is already set up"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Playback defaults",
+        "data": {
+          "target": "Default Cast device",
+          "volume": "Default volume",
+          "quality": "Audio quality"
+        }
+      }
+    }
+  }
+}
